@@ -1,8 +1,9 @@
+
 import React, { useState, useCallback, useMemo, useEffect } from 'react';
 import { GoogleOAuthProvider, CredentialResponse } from '@react-oauth/google';
+import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import type { Recipe, MenuPlan, RecipeFix, UserProfile, FoodAnalysis, HistoryItem } from './types';
 import { generateRecipesByIngredients, generateRecipeByName, generateRecipeImage, generateMenuPlan, generateTiffinRecipes, generateRecipeFix, analyzeFoodImage } from './services/geminiService';
-import { supabase } from './supabaseClient'; // Import the Supabase client
 import IngredientInput from './components/IngredientInput';
 import IngredientList from './components/IngredientList';
 import RecipeDisplay from './components/RecipeDisplay';
@@ -21,8 +22,6 @@ import ImageUploader from './components/ImageUploader';
 import FoodAnalysisDisplay from './components/FoodAnalysisDisplay';
 import HistoryPanel from './components/HistoryPanel';
 import { HistoryIcon } from './components/icons/HistoryIcon';
-
-const GOOGLE_CLIENT_ID = process.env.GOOGLE_CLIENT_ID;
 
 type Diet = 'Any' | 'Vegetarian' | 'Non-Vegetarian';
 type Mode = 'recipe' | 'tiffin' | 'menu' | 'rescue' | 'vision' | 'saved';
@@ -48,6 +47,10 @@ const countries = [
 const availablePreferences = ['Gluten-Free', 'High Protein', 'Kid-Friendly', 'Less Oily', 'Less Salty', 'Low Carb', 'Non-Spicy', 'Quick & Easy', 'Spicy'];
 
 const App: React.FC = () => {
+  const [config, setConfig] = useState<{ googleClientId?: string; supabaseUrl?: string; supabaseAnonKey?: string; } | null>(null);
+  const [supabase, setSupabase] = useState<SupabaseClient | null>(null);
+  const [isConfigLoading, setIsConfigLoading] = useState(true);
+
   const [userProfile, setUserProfile] = useState<UserProfile | null>(null);
   const [isNameModalOpen, setIsNameModalOpen] = useState(false);
   const [sessionChecked, setSessionChecked] = useState(false);
@@ -94,6 +97,30 @@ const App: React.FC = () => {
   const [isModalOpen, setIsModalOpen] = useState(false);
   const [history, setHistory] = useState<HistoryItem[]>([]);
   const [isHistoryPanelOpen, setIsHistoryPanelOpen] = useState(false);
+  
+  useEffect(() => {
+    const fetchConfig = async () => {
+      try {
+        const response = await fetch('/api/config');
+        if (!response.ok) {
+          throw new Error('Failed to fetch config');
+        }
+        const appConfig = await response.json();
+        setConfig(appConfig);
+        
+        if (appConfig.supabaseUrl && appConfig.supabaseAnonKey) {
+          setSupabase(createClient(appConfig.supabaseUrl, appConfig.supabaseAnonKey));
+        } else {
+          console.warn("Supabase configuration not found. Database features will be disabled.");
+        }
+      } catch (error) {
+        console.error("Could not load app configuration:", error);
+      } finally {
+        setIsConfigLoading(false);
+      }
+    };
+    fetchConfig();
+  }, []);
 
   // Supabase Auth and Data loading
   useEffect(() => {
@@ -119,7 +146,7 @@ const App: React.FC = () => {
     });
 
     return () => subscription.unsubscribe();
-  }, []);
+  }, [supabase]);
 
   const fetchUserProfile = async (userId: string) => {
     if (!supabase) return;
@@ -594,10 +621,15 @@ ${recipe.instructions.map((step, i) => `${i + 1}. ${step}`).join('\n')}
     setIsHistoryPanelOpen(false);
 
     setRecipeFinderMode(params.recipeFinderMode || 'ingredient');
-    setIngredients(params.ingredients || ['flour', 'water', 'oil', 'salt', 'sugar', 'pepper', 'onion', 'garlic']);
+    // FIX: Cast `params.ingredients` to `string[]` to resolve a type error when loading from history.
+    // The `params` object from history has a type of `any`, which is not directly compatible with `string[]`.
+    setIngredients((params.ingredients as string[]) || ['flour', 'water', 'oil', 'salt', 'sugar', 'pepper', 'onion', 'garlic']);
     setRecipeQuery(params.recipeQuery || '');
     setServings(params.servings || 2);
-    setPreferences(new Set(params.preferences || []));
+    // FIX: Cast `params.preferences` to `string[]` to resolve a type error.
+    // The `Set` constructor expects an iterable of strings, and casting ensures type safety
+    // when loading preferences from the `any`-typed history params.
+    setPreferences(new Set((params.preferences as string[]) || []));
     setAllergies(params.allergies || '');
     setCookLevel(params.cookLevel || 'Beginner');
     setCookAge(params.cookAge || 'Major');
@@ -787,7 +819,7 @@ ${recipe.instructions.map((step, i) => `${i + 1}. ${step}`).join('\n')}
                             <HistoryIcon className="w-6 h-6 text-gray-600" />
                         </button>
                     )}
-                    {(GOOGLE_CLIENT_ID && supabase) ? (
+                    {(config?.googleClientId && supabase) ? (
                       <Auth user={userProfile} onLoginSuccess={handleLoginSuccess} onLogout={handleLogout} />
                     ) : (
                       <div className="text-sm text-gray-500 bg-gray-100 p-2 rounded-md border border-gray-200">Auth Disabled</div>
@@ -1041,7 +1073,7 @@ ${recipe.instructions.map((step, i) => `${i + 1}. ${step}`).join('\n')}
           items={Array.from(shoppingList)} 
           onClear={() => setShoppingList(new Set())} 
         />
-        { (GOOGLE_CLIENT_ID && supabase) && (
+        { (config?.googleClientId && supabase) && (
             <NamePromptModal 
                 isOpen={isNameModalOpen}
                 onClose={() => setIsNameModalOpen(false)}
@@ -1052,17 +1084,17 @@ ${recipe.instructions.map((step, i) => `${i + 1}. ${step}`).join('\n')}
       </div>
   );
   
-  if (!sessionChecked) {
+  if (isConfigLoading || !sessionChecked) {
       return (
           <div className="flex justify-center items-center min-h-screen">
-              {/* You could add a spinner here */}
+              <div className="w-16 h-16 border-4 border-green-500 border-t-transparent rounded-full animate-spin"></div>
           </div>
       );
   }
 
-  if (GOOGLE_CLIENT_ID) {
+  if (config?.googleClientId) {
     return (
-      <GoogleOAuthProvider clientId={GOOGLE_CLIENT_ID}>
+      <GoogleOAuthProvider clientId={config.googleClientId}>
         {AppContent}
       </GoogleOAuthProvider>
     );

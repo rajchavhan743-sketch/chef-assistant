@@ -1,4 +1,3 @@
-import type { Recipe as OriginalRecipe } from './types';
 
 export interface Ingredient {
   name: string;
