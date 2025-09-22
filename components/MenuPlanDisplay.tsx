@@ -60,6 +60,20 @@ const MenuPlanDisplay: React.FC<MenuPlanDisplayProps> = ({ plan, isLoading }) =>
             </div>
           ))}
         </div>
+        
+        {plan.planOfAction && plan.planOfAction.length > 0 && (
+          <div className="mt-8 pt-6 border-t border-gray-200">
+            <h3 className="text-2xl font-semibold text-gray-800 text-center mb-4">
+              Chef's Tips for Success
+            </h3>
+            <ul className="space-y-2 text-gray-700 list-disc list-inside bg-gray-50 p-4 rounded-lg">
+              {plan.planOfAction.map((tip, index) => (
+                <li key={index}>{tip}</li>
+              ))}
+            </ul>
+          </div>
+        )}
+
       </CardContent>
     </Card>
   );
